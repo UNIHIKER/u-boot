@@ -9,6 +9,10 @@ config SYS_VENDOR
 config SYS_CONFIG_NAME
 	default "evb_rk3308"
 
+config RK3308_UNIHIKER
+	bool "DFROBOT Unihiker M10 board (extlinux on boot partition)"
+	default n
+
 config BOARD_SPECIFIC_OPTIONS # dummy
 	def_bool y
 

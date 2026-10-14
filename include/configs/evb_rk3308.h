@@ -19,7 +19,16 @@
 
 #ifndef CONFIG_SPL_BUILD
 #undef CONFIG_BOOTCOMMAND
+#if defined(CONFIG_ROCKCHIP_FIT_IMAGE) && !defined(CONFIG_ANDROID_BOOT_IMAGE)
+# ifdef CONFIG_RK3308_UNIHIKER
+/* Unihiker: FAT boot partition (mmc 0:4) with boot.scr + Image + DTB */
+#  define CONFIG_BOOTCOMMAND "load mmc 0:4 0x00500000 boot.scr; source 0x00500000"
+# else
+#  define CONFIG_BOOTCOMMAND "boot_fit;"
+# endif
+#else
 #define CONFIG_BOOTCOMMAND RKIMG_BOOTCOMMAND
+#endif
 #endif
 
 #endif

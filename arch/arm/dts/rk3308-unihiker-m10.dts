@@ -1,0 +1,15 @@
+/*
+ * (C) Copyright 2018 Rockchip Electronics Co., Ltd
+ *
+ * SPDX-License-Identifier:     GPL-2.0+
+ *
+ * DFROBOT UNIHIKER M10 board; reuse RK3308 EVB with model override.
+ */
+
+/dts-v1/;
+#include "rk3308-evb.dts"
+
+/ {
+	model = "DFROBOT UNIHIKER M10";
+	compatible = "dfrobot,unihiker-m10", "rockchip,rk3308-evb", "rockchip,rk3308";
+};

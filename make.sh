@@ -822,7 +822,13 @@ select_ini_file
 handle_args_late
 sub_commands
 clean_files
-make PYTHON=python2 ${ARG_SPL_FWVER} ${ARG_FWVER} CROSS_COMPILE=${TOOLCHAIN} all --jobs=${JOB}
+# Relax specific warning-as-error checks for GCC to avoid build breaks:
+#  - enum-int-mismatch: used for cmd_process() signature difference
+#  - maybe-uninitialized: used in charge_animation.c
+make PYTHON=python2 ${ARG_SPL_FWVER} ${ARG_FWVER} \
+     CROSS_COMPILE=${TOOLCHAIN} \
+     KCFLAGS="-Wno-error=enum-int-mismatch -Wno-error=maybe-uninitialized" \
+     all --jobs=${JOB}
 pack_images
 finish
 echo ${TOOLCHAIN}

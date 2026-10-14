@@ -302,6 +302,19 @@ int fit_image_pre_process(const void *fit)
 			env_set("kernel_addr_r", kernel_addr_r);
 	}
 #endif
+	/*
+	 * When FIT was loaded by extlinux to kernel_addr_r (e.g. 0x02000000),
+	 * use kernel_addr_no_low_bl32_r for the kernel so FIT_USER and KERNEL
+	 * do not overlap (e.g. Unihiker).
+	 */
+	{
+		char *addr_r;
+		if ((ulong)fit == env_get_ulong("kernel_addr_r", 16, 0)) {
+			addr_r = env_get("kernel_addr_no_low_bl32_r");
+			if (addr_r)
+				env_set("kernel_addr_r", addr_r);
+		}
+	}
 	/* get image data address and length */
 	if (fit_image_get_data(fit, noffset, &buf, &size)) {
 		printf("Could not find %s subimage data!\n", FIT_KERNEL_PROP);

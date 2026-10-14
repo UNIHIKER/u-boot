@@ -2358,8 +2358,11 @@ int fit_image_load_index(bootm_headers_t *images, ulong addr,
 
 #if !defined(USE_HOSTCC)
 	ret = fit_image_get_load(fit, noffset, &load);
-	if (ret < 0)
-		return ret;
+	if (ret < 0) {
+		if (load_op == FIT_LOAD_REQUIRED)
+			return ret;
+		load = 0;	/* no load property: use data in-place */
+	}
 
 #if defined(CONFIG_FIT_CIPHER)
 	int cipher_noffset =
@@ -2495,7 +2498,7 @@ int boot_get_fdt_fit(bootm_headers_t *images, ulong addr,
 	const char *fit_uname_config = NULL;
 	char *fit_uname_config_copy = NULL;
 	char *next_config = NULL;
-	ulong load, len;
+	ulong load = 0, len = 0;
 #ifdef CONFIG_OF_LIBFDT_OVERLAY
 	ulong image_start, image_end;
 	ulong ovload, ovlen;
@@ -2610,10 +2613,12 @@ int boot_get_fdt_fit(bootm_headers_t *images, ulong addr,
 #endif
 
 out:
-	if (datap)
-		*datap = load;
-	if (lenp)
-		*lenp = len;
+	if (fdt_noffset >= 0) {
+		if (datap)
+			*datap = load;
+		if (lenp)
+			*lenp = len;
+	}
 	if (fit_unamep)
 		*fit_unamep = fit_uname;
 	if (fit_uname_configp)

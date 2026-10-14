@@ -340,9 +340,8 @@ static void env_fixup(void)
 	struct memblock mem;
 	ulong u_addr_r;
 	phys_size_t end;
-	char *addr_r;
-
 #ifdef ENV_MEM_LAYOUT_SETTINGS1
+	char *addr_r;
 	const char *env_addr0[] = {
 		"scriptaddr", "pxefile_addr_r",
 		"fdt_addr_r", "kernel_addr_r", "kernel_addr_c", "ramdisk_addr_r",
@@ -367,10 +366,15 @@ static void env_fixup(void)
 	if (!(gd->flags & GD_FLG_BL32_ENABLED)) {
 		/*
 		 * [1] Move kernel to lower address if possible.
+		 * Skip for Unihiker: boot.scr loads Image+DTB, keep default kernel_addr_r.
 		 */
-		addr_r = env_get("kernel_addr_no_low_bl32_r");
-		if (addr_r)
-			env_set("kernel_addr_r", addr_r);
+#ifndef CONFIG_RK3308_UNIHIKER
+		{
+			char *addr_r = env_get("kernel_addr_no_low_bl32_r");
+			if (addr_r)
+				env_set("kernel_addr_r", addr_r);
+		}
+#endif
 
 		/*
 		 * [2] Move ramdisk at BL32 position if need.
@@ -396,11 +400,13 @@ static void env_fixup(void)
 		/*
 		 * [1] Move kernel forward if possible.
 		 */
+#ifndef CONFIG_RK3308_UNIHIKER
 		if (mem.base > SZ_128M) {
-			addr_r = env_get("kernel_addr_no_low_bl32_r");
+			char *addr_r = env_get("kernel_addr_no_low_bl32_r");
 			if (addr_r)
 				env_set("kernel_addr_r", addr_r);
 		}
+#endif
 
 		/*
 		 * [2] Move ramdisk backward if optee enlarge.
