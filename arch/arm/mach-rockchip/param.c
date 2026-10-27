@@ -12,9 +12,7 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
-#define SZ_4GB				0x100000000ULL
-
-#ifndef CONFIG_SPL_BUILD
+#if !defined(CONFIG_SPL_BUILD) && !defined(CONFIG_TPL_BUILD)
 #define SDRAM_OFFSET(offset)		(CONFIG_SYS_SDRAM_BASE + (offset))
 #define PARAM_DRAM_INFO_OFFSET		(SZ_32M)
 #define PARAM_OPTEE_INFO_OFFSET		(SZ_32M + SZ_2M)
@@ -164,26 +162,7 @@ struct memblock param_parse_common_resv_mem(void)
 	return mem;
 }
 
-int param_parse_assign_bootdev(char **devtype, char **devnum)
-{
-	char *bootdev_str = CONFIG_ROCKCHIP_BOOTDEV;
-	char *type, *num;
-
-	num = strchr(bootdev_str, ' ');
-	if (!num)
-		return -ENODEV;
-
-	type = strdup(bootdev_str);
-	type[num - bootdev_str] = 0;
-	num++;
-
-	*devtype = type;
-	*devnum = num;
-
-	return 0;
-}
-
-int param_parse_atags_bootdev(char **devtype, char **devnum)
+int param_parse_bootdev(char **devtype, char **devnum)
 {
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	struct tag *t;
@@ -194,12 +173,21 @@ int param_parse_atags_bootdev(char **devtype, char **devnum)
 #ifdef CONFIG_DM_MMC
 		case BOOT_TYPE_EMMC:
 			*devtype = "mmc";
+#if defined(CONFIG_ROCKCHIP_RK3308)
+			*devnum = "1";
+#else
 			*devnum = "0";
+#endif
 			break;
 		case BOOT_TYPE_SD0:
 		case BOOT_TYPE_SD1:
 			*devtype = "mmc";
+#if defined(CONFIG_ROCKCHIP_RK3308)
+			/* Unihiker: TF=mmc0，勿用通用 ATAG 的 devnum=1 */
+			*devnum = "0";
+#else
 			*devnum = "1";
+#endif
 			/*
 			 * If preloader does not pass sdupdate value, we treat it
 			 * as a unknown card and call the rkimgtest cmd to find
@@ -210,8 +198,13 @@ int param_parse_atags_bootdev(char **devtype, char **devnum)
 			 * calling rkimgtest cmd which consumes time.
 			 */
 			if (t->u.bootdev.sdupdate == SD_UNKNOWN_CARD) {
+#if defined(CONFIG_ROCKCHIP_RK3308)
+				run_command("mmc dev 0", 0);
+				run_command("rkimgtest mmc 0", 0);
+#else
 				run_command("mmc dev 1", 0);
 				run_command("rkimgtest mmc 1", 0);
+#endif
 			} else if (t->u.bootdev.sdupdate == SD_UPDATE_CARD) {
 				env_update("bootargs", "sdfwupdate");
 			}
@@ -241,30 +234,6 @@ int param_parse_atags_bootdev(char **devtype, char **devnum)
 			*devnum = "0";
 			break;
 #endif
-#ifdef CONFIG_NAND
-		case BOOT_TYPE_MTD_BLK_NAND:
-			*devtype = "mtd";
-			*devnum = "0";
-			break;
-#endif
-#ifdef CONFIG_MTD_SPI_NAND
-		case BOOT_TYPE_MTD_BLK_SPI_NAND:
-			*devtype = "mtd";
-			*devnum = "1";
-			break;
-#endif
-#ifdef CONFIG_SPI_FLASH_MTD
-		case BOOT_TYPE_MTD_BLK_SPI_NOR:
-			*devtype = "mtd";
-			*devnum = "2";
-			break;
-#endif
-#ifdef CONFIG_UFS
-		case BOOT_TYPE_UFS:
-			*devtype = "scsi";
-			*devnum = "0";
-			break;
-#endif
 		default:
 			printf("Unknown bootdev type: 0x%x\n",
 			       t->u.bootdev.devtype);
@@ -279,7 +248,7 @@ int param_parse_atags_bootdev(char **devtype, char **devnum)
 }
 #endif
 
-phys_size_t ddr_mem_get_usable_size(u64 base, u64 size)
+static phys_size_t ddr_mem_get_usable_size(u64 base, u64 size)
 {
 	return (base + size >= CONFIG_SYS_SDRAM_BASE + SDRAM_MAX_SIZE) ?
 	       (CONFIG_SYS_SDRAM_BASE + SDRAM_MAX_SIZE - base) : size;
@@ -300,46 +269,24 @@ struct memblock *param_parse_ddr_mem(int *out_count)
 	 */
 #ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
 	struct tag *t;
-	u64 base, size;
-	int n;
 
 	t = atags_get_tag(ATAG_DDR_MEM);
 	if (t && t->u.ddr_mem.count) {
-		/* extend top ram size */
-		if (t->u.ddr_mem.flags & DDR_MEM_FLG_EXT_TOP)
-			gd->ram_top_ext_size = t->u.ddr_mem.data[0];
-
-		/* normal ram size */
 		count = t->u.ddr_mem.count;
-		mem = calloc(count + MEM_RESV_COUNT, sizeof(*mem));
+		mem = calloc(count, sizeof(*mem));
 		if (!mem) {
 			printf("Calloc ddr memory failed\n");
 			return 0;
 		}
 
-		for (i = 0, n = 0; i < count; i++, n++) {
-			base = t->u.ddr_mem.bank[i];
-			size = t->u.ddr_mem.bank[i + count];
-
-			/* 0~4GB */
-			if (base < SZ_4GB) {
-				mem[n].base = base;
-				mem[n].size = ddr_mem_get_usable_size(base, size);
-				if (base + size > SZ_4GB) {
-					n++;
-					mem[n].base_u64 = SZ_4GB;
-					mem[n].size_u64 = base + size - SZ_4GB;
-				}
-			} else {
-				/* 4GB+ */
-				mem[n].base_u64 = base;
-				mem[n].size_u64 = size;
-			}
-
-			assert(n < count + MEM_RESV_COUNT);
+		for (i = 0; i < count; i++) {
+			mem[i].base = t->u.ddr_mem.bank[i];
+			mem[i].size =
+			  ddr_mem_get_usable_size(t->u.ddr_mem.bank[i],
+						  t->u.ddr_mem.bank[i + count]);
 		}
 
-		*out_count = n;
+		*out_count = count;
 		return mem;
 	}
 #endif
@@ -374,91 +321,3 @@ struct memblock *param_parse_ddr_mem(int *out_count)
 	*out_count = count;
 	return mem;
 }
-
-#ifndef CONFIG_BIDRAM
-/*
- * init_bank=0: called from dram_init_banksize()
- * init_bank=0: called from dram_init()
- */
-phys_size_t param_simple_parse_ddr_mem(int init_bank)
-{
-	struct memblock *list;
-	int i, count;
-
-	list = param_parse_ddr_mem(&count);
-	if (!list) {
-		printf("Can't get dram banks\n");
-		return 0;
-	}
-
-	if (count > CONFIG_NR_DRAM_BANKS) {
-		printf("Dram banks num=%d, over %d\n", count, CONFIG_NR_DRAM_BANKS);
-		return 0;
-	}
-
-	if (!init_bank) {
-		i = count - 1;
-		return ddr_mem_get_usable_size(list[i].base, list[i].size);
-	}
-
-	for (i = 0; i < count; i++) {
-		gd->bd->bi_dram[i].start = list[i].base;
-		gd->bd->bi_dram[i].size =
-			ddr_mem_get_usable_size(list[i].base, list[i].size);
-		debug("bank[%d]: 0x%08lx - 0x%08lx\n", i,
-		      (ulong)gd->bd->bi_dram[i].start,
-		      (ulong)gd->bd->bi_dram[i].start +
-		      (ulong)gd->bd->bi_dram[i].size);
-	}
-
-	return 0;
-}
-#endif
-
-int param_parse_pre_serial(int *flags)
-{
-#if defined(CONFIG_ROCKCHIP_PRELOADER_SERIAL) && \
-    defined(CONFIG_ROCKCHIP_PRELOADER_ATAGS)
-	struct tag *t;
-
-	t = atags_get_tag(ATAG_SERIAL);
-	if (t) {
-		gd->serial.using_pre_serial = 1;
-		gd->serial.enable = t->u.serial.enable;
-		gd->serial.baudrate = t->u.serial.baudrate;
-		gd->serial.addr = t->u.serial.addr;
-		gd->serial.id = t->u.serial.id;
-		gd->baudrate = CONFIG_BAUDRATE;
-		if (!gd->serial.enable && flags)
-			*flags |= GD_FLG_DISABLE_CONSOLE;
-		debug("preloader: enable=%d, addr=0x%lx, baudrate=%d, id=%d\n",
-		      gd->serial.enable, gd->serial.addr,
-		      gd->serial.baudrate, gd->serial.id);
-	} else
-#endif
-	{
-		gd->baudrate = CONFIG_BAUDRATE;
-		gd->serial.baudrate = CONFIG_BAUDRATE;
-		gd->serial.addr = CONFIG_DEBUG_UART_BASE;
-	}
-
-	return 0;
-}
-
-int param_parse_pubkey_fuse_programmed(void)
-{
-#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
-	struct tag *t;
-
-	t = atags_get_tag(ATAG_PUB_KEY);
-	if (t) {
-		/* Pass if efuse/otp programmed */
-		if (t->u.pub_key.flag == PUBKEY_FUSE_PROGRAMMED)
-			env_update("bootargs", "fuse.programmed=1");
-		else
-			env_update("bootargs", "fuse.programmed=0");
-	}
-#endif
-	return 0;
-}
-

@@ -1,0 +1,160 @@
+/*
+ * (C) Copyright 2018 Rockchip Electronics Co., Ltd
+ *
+ * SPDX-License-Identifier:     GPL-2.0+
+ */
+
+/dts-v1/;
+#include "rk3308.dtsi"
+#include "rk3308-u-boot.dtsi"
+#include <dt-bindings/input/input.h>
+#include <linux/media-bus-format.h>
+
+/ {
+	model = "DFRobot unihiker M10";
+	compatible = "dfrobot,unihiker", "rockchip,rk3308";
+
+	/* rk3308-u-boot.dtsi 默认 stdout-path=&uart2，Unihiker 调试口为 uart0 */
+	chosen {
+		stdout-path = &uart0;
+	};
+
+	vdd_log: vdd_core: vdd-core {
+		compatible = "pwm-regulator";
+		pwms = <&pwm0 0 5000 1>;
+		regulator-name = "vdd_core";
+		regulator-min-microvolt = <847000>;
+		regulator-max-microvolt = <1366000>;
+		regulator-init-microvolt  = <1044000>;
+		regulator-always-on;
+		regulator-boot-on;
+		status = "okay";
+	};
+
+	vcc5v0_host: vcc5v0-host-en {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_host";
+		enable-active-high;
+		gpio = <&gpio0 RK_PC5 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc5v0_host_drv>;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vcc_phy: vcc-phy-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_phy";
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* TF 3.3V 供电（与内核 vcc_sd 一致，GPIO4_PD6 低有效） */
+	vcc_sd: vcc-sd {
+		compatible = "regulator-fixed";
+		gpio = <&gpio4 RK_PD6 GPIO_ACTIVE_LOW>;
+		enable-active-low;
+		regulator-name = "vcc_sd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+
+	/* TF 信号电平：U-Boot 无 regulator-gpio，固定 3.3V 避免 -95 voltage select */
+	vccio_sd: vccio-sd {
+		compatible = "regulator-fixed";
+		regulator-name = "vccio_sd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		regulator-always-on;
+	};
+};
+
+&emmc {
+	cap-mmc-highspeed;
+	supports-emmc;
+	non-removable;
+	num-slots = <1>;
+	status = "okay";
+};
+
+&sdmmc_pin {
+	/* 与内核 rk3308bs-pinctrl.dtsi 一致 */
+	sdmmc_det: sdmmc-det {
+		rockchip,pins = <0 RK_PA3 1 &pcfg_pull_up_4ma>;
+	};
+};
+
+&sdmmc {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	supports-sd;
+	disable-wp;
+	card-detect-delay = <800>;
+	vmmc-supply = <&vcc_sd>;
+	vqmmc-supply = <&vccio_sd>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc_clk &sdmmc_cmd &sdmmc_det &sdmmc_bus4>;
+	status = "okay";
+};
+
+&pwm0 {
+	status = "okay";
+};
+
+&u2phy {
+	status = "okay";
+};
+
+&u2phy_otg {
+	status = "okay";
+};
+
+&u2phy_host {
+	status = "okay";
+};
+
+&usb_host0_ehci {
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "okay";
+};
+
+&usb20_otg {
+	status = "okay";
+};
+
+&mac {
+	phy-supply = <&vcc_phy>;
+	clock_in_out = "output";
+	assigned-clocks = <&cru SCLK_MAC>;
+	assigned-clock-parents = <&cru SCLK_MAC_SRC>;
+	snps,reset-gpio = <&gpio0 RK_PA7 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 50000 50000>;
+	status = "disabled";
+};
+
+&pinctrl {
+	usb {
+		vcc5v0_host_drv: vcc5v0-host-drv {
+			rockchip,pins = <0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&uart0 {
+	clock-frequency = <24000000>;
+	pinctrl-0 = <&uart0_xfer>;
+	status = "okay";
+};
+
+&uart2 {
+	status = "disabled";
+};

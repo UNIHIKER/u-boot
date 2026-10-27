@@ -85,13 +85,6 @@ else
   Q = @
 endif
 
-ifeq ("$(origin FWVER)", "command line")
-  PLAT_FW_VERSION := $(FWVER)
-endif
-ifeq ("$(origin SPL_FWVER)", "command line")
-  PLAT_SPL_FW_VERSION := $(SPL_FWVER)
-endif
-
 # If the user is running make -s (silent mode), suppress echoing of
 # commands
 
@@ -612,7 +605,6 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-stack-usage.sh $(CC)),y)
 endif
 
 KBUILD_CFLAGS += $(call cc-option,-Wno-format-nonliteral)
-KBUILD_CFLAGS += $(call cc-disable-warning, address-of-packed-member)
 
 # turn jbsr into jsr for m68k
 ifeq ($(ARCH),m68k)
@@ -623,6 +615,9 @@ endif
 
 # Prohibit date/time macros, which would make the build non-deterministic
 KBUILD_CFLAGS   += $(call cc-option,-Werror=date-time)
+
+# GCC 10+ (prebuilts aarch64-none-linux-gnu) 对 packed 结构体取址会触发 -Werror
+KBUILD_CFLAGS += $(call cc-disable-warning, address-of-packed-member)
 
 include scripts/Makefile.extrawarn
 
@@ -658,7 +653,6 @@ HAVE_VENDOR_COMMON_LIB = $(if $(wildcard $(srctree)/board/$(VENDOR)/common/Makef
 libs-y += lib/
 libs-$(HAVE_VENDOR_COMMON_LIB) += board/$(VENDOR)/common/
 libs-$(CONFIG_OF_EMBED) += dts/
-ifneq ($(CONFIG_SPL_BUILD)$(CONFIG_SPL_DECOMP_HEADER),yy)
 libs-y += fs/
 libs-y += net/
 libs-y += disk/
@@ -691,7 +685,6 @@ libs-$(CONFIG_SYS_FSL_DDR) += drivers/ddr/fsl/
 libs-$(CONFIG_SYS_FSL_MMDC) += drivers/ddr/fsl/
 libs-$(CONFIG_ALTERA_SDRAM) += drivers/ddr/altera/
 libs-y += drivers/serial/
-libs-y += drivers/usb/cdns3/
 libs-y += drivers/usb/dwc3/
 libs-y += drivers/usb/common/
 libs-y += drivers/usb/emul/
@@ -708,7 +701,6 @@ libs-y += common/
 libs-y += env/
 libs-$(CONFIG_API) += api/
 libs-$(CONFIG_HAS_POST) += post/
-endif
 libs-y += test/
 libs-y += test/dm/
 libs-$(CONFIG_UT_ENV) += test/env/
@@ -781,7 +773,6 @@ endif
 
 # Always append ALL so that arch config.mk's can add custom ones
 ALL-y += u-boot.srec u-boot.bin u-boot.sym System.map binary_size_check
-ALL-$(CONFIG_SUPPORT_USBPLUG) += usbplug.bin
 
 ALL-$(CONFIG_ONENAND_U_BOOT) += u-boot-onenand.bin
 ifeq ($(CONFIG_SPL_FSL_PBL),y)
@@ -886,16 +877,18 @@ endif
 	$(call cmd,cfgcheck,u-boot.cfg)
 
 PHONY += dtbs
-dtbs: dts/dt.dtb
+dtbs: dts/dt.dtb dts/dt-spl.dtb
 	@:
 dts/dt.dtb: u-boot
 	$(Q)$(MAKE) $(build)=dts dtbs
 
+ifeq ($(CONFIG_USING_KERNEL_DTB),y)
+dts/dt-spl.dtb: dts/dt.dtb
+	@:
+endif
+
 quiet_cmd_copy = COPY    $@
       cmd_copy = cp $< $@
-
-quiet_cmd_truncate = ALIGN   $@
-      cmd_truncate = truncate -s "%8" $@
 
 ifeq ($(CONFIG_MULTI_DTB_FIT),y)
 
@@ -912,30 +905,28 @@ u-boot-fit-dtb.bin: u-boot-nodtb.bin fit-dtb.blob
 u-boot.bin: u-boot-fit-dtb.bin FORCE
 	$(call if_changed,copy)
 else ifeq ($(CONFIG_OF_SEPARATE),y)
-
-u-boot-dtb.bin: u-boot-nodtb.bin dts/dt.dtb FORCE
+ifeq ($(CONFIG_USING_KERNEL_DTB),y)
+u-boot-dtb.bin: u-boot-nodtb.bin dts/dt-spl.dtb FORCE
 	$(call if_changed,cat)
 
-EMBED_KERN_DTB := $(CONFIG_EMBED_KERNEL_DTB_PATH:"%"=%)
-ifneq ($(wildcard $(EMBED_KERN_DTB)),)
+ifneq ($(wildcard dts/kern.dtb),)
 u-boot-dtb-kern.bin: u-boot-dtb.bin FORCE
 	$(call if_changed,copy)
-	$(call if_changed,truncate)
-u-boot.bin: u-boot-dtb-kern.bin $(EMBED_KERN_DTB) FORCE
+u-boot.bin: u-boot-dtb-kern.bin dts/kern.dtb FORCE
 	$(call if_changed,cat)
 else
 u-boot.bin: u-boot-dtb.bin FORCE
 	$(call if_changed,copy)
-	$(call if_changed,truncate)
 endif
-
 else
-u-boot.bin: u-boot-nodtb.bin FORCE
+
+u-boot-dtb.bin: u-boot-nodtb.bin dts/dt.dtb FORCE
+	$(call if_changed,cat)
+u-boot.bin: u-boot-dtb.bin FORCE
 	$(call if_changed,copy)
 endif
-
-ifeq ($(CONFIG_SUPPORT_USBPLUG),y)
-usbplug.bin: u-boot.bin
+else
+u-boot.bin: u-boot-nodtb.bin FORCE
 	$(call if_changed,copy)
 endif
 
@@ -948,7 +939,11 @@ endif
 quiet_cmd_copy = COPY    $@
       cmd_copy = cp $< $@
 
+ifeq ($(CONFIG_USING_KERNEL_DTB),y)
+u-boot.dtb: dts/dt-spl.dtb FORCE
+else
 u-boot.dtb: dts/dt.dtb FORCE
+endif
 	$(call cmd,copy)
 
 OBJCOPYFLAGS_u-boot.hex := -O ihex
@@ -1056,7 +1051,11 @@ u-boot-dtb.img u-boot.img u-boot.kwb u-boot.pbl u-boot-ivt.img: \
 		$(if $(CONFIG_SPL_LOAD_FIT),u-boot-nodtb.bin dts/dt.dtb,u-boot.bin) FORCE
 	$(call if_changed,mkimage)
 
+ifeq ($(CONFIG_USING_KERNEL_DTB),y)
+u-boot.itb: u-boot-nodtb.bin dts/dt-spl.dtb $(U_BOOT_ITS) FORCE
+else
 u-boot.itb: u-boot-nodtb.bin dts/dt.dtb $(U_BOOT_ITS) FORCE
+endif
 	$(call if_changed,mkfitimage)
 
 u-boot-spl.kwb: u-boot.img spl/u-boot-spl.bin FORCE
@@ -1372,33 +1371,12 @@ prepare: prepare0
 # Generate some files
 # ---------------------------------------------------------------------------
 
-ifeq ($(CONFIG_SUPPORT_USBPLUG),)
 define filechk_version.h
 	(echo \#define PLAIN_VERSION \"$(UBOOTRELEASE)\"; \
 	echo \#define U_BOOT_VERSION \"U-Boot \" PLAIN_VERSION; \
-	if [ -n "$(PLAT_SPL_FW_VERSION)" ]; then \
-		echo \#define BUILD_SPL_TAG \"$(PLAT_SPL_FW_VERSION)\"; \
-	fi; \
-	if [ -n "$(PLAT_FW_VERSION)" ]; then \
-        echo \#define BUILD_TAG \"$(PLAT_FW_VERSION)\"; \
-	fi; \
 	echo \#define CC_VERSION_STRING \"$$(LC_ALL=C $(CC) --version | head -n 1)\"; \
 	echo \#define LD_VERSION_STRING \"$$(LC_ALL=C $(LD) --version | head -n 1)\"; )
 endef
-else
-define filechk_version.h
-        (echo \#define PLAIN_VERSION \"$(UBOOTRELEASE)\"; \
-        echo \#define U_BOOT_VERSION \"USB-PLUG \" PLAIN_VERSION; \
-        if [ -n "$(PLAT_SPL_FW_VERSION)" ]; then \
-            echo \#define BUILD_SPL_TAG \"$(PLAT_SPL_FW_VERSION)\"; \
-        fi; \
-        if [ -n "$(PLAT_FW_VERSION)" ]; then \
-            echo \#define BUILD_TAG \"$(PLAT_FW_VERSION)\"; \
-        fi; \
-        echo \#define CC_VERSION_STRING \"$$(LC_ALL=C $(CC) --version | head -n 1)\"; \
-        echo \#define LD_VERSION_STRING \"$$(LC_ALL=C $(LD) --version | head -n 1)\"; )
-endef
-endif
 
 # The SOURCE_DATE_EPOCH mechanism requires a date that behaves like GNU date.
 # The BSD date on the other hand behaves different and would produce errors
@@ -1504,7 +1482,7 @@ checkarmreloc: u-boot
 		false; \
 	fi
 
-envtools: scripts_basic $(version_h) $(timestamp_h)
+envtools: scripts_basic
 	$(Q)$(MAKE) $(build)=tools/env
 
 tools-only: scripts_basic $(version_h) $(timestamp_h)
@@ -1536,7 +1514,7 @@ CLEAN_DIRS  += $(MODVERDIR) \
 			$(filter-out include, $(shell ls -1 $d 2>/dev/null))))
 
 CLEAN_FILES += include/bmp_logo.h include/bmp_logo_data.h \
-	       boot* u-boot* MLO* SPL System.map fit-dtb.blob *.bin *.img *.gz .cc
+	       boot* u-boot* MLO* SPL System.map fit-dtb.blob *.bin *.img
 
 # Directories & files removed with 'make mrproper'
 MRPROPER_DIRS  += include/config include/generated spl tpl \
@@ -1720,13 +1698,6 @@ endif
 	$(Q)$(MAKE) KBUILD_MODULES=$(if $(CONFIG_MODULES),1)   \
 	$(build)=$(build-dir) $(@:.ko=.o)
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
-
-quiet_cmd_genenv = GENENV $@
-cmd_genenv = $(OBJCOPY) --dump-section .rodata.default_environment=$@ env/common.o; \
-	sed --in-place -e 's/\x00/\x0A/g' $@
-
-u-boot-initial-env: u-boot.bin
-	$(call if_changed,genenv)
 
 # FIXME Should go into a make.lib or something
 # ===========================================================================

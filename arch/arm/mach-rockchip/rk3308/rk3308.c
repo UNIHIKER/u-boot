@@ -1,21 +1,16 @@
-// SPDX-License-Identifier:     GPL-2.0+
 /*
- * Copyright (C) 2020 Rockchip Electronics Co., Ltd
+ * Copyright (c) 2018 Rockchip Electronics Co., Ltd
+ *
+ * SPDX-License-Identifier:     GPL-2.0+
  */
-
 #include <common.h>
 #include <fdt_support.h>
-#include <ram.h>
 #include <asm/io.h>
-#include <asm/arch/boot_mode.h>
-#include <asm/arch/bootrom.h>
-#include <asm/arch/cru_rk3308.h>
 #include <asm/arch/cpu.h>
 #include <asm/arch/grf_rk3308.h>
 #include <asm/arch/hardware.h>
 #include <asm/arch/rk_atags.h>
 #include <asm/gpio.h>
-#include <asm/arch/sdram_common.h>
 #include <debug_uart.h>
 
 DECLARE_GLOBAL_DATA_PTR;
@@ -47,9 +42,9 @@ struct mm_region *mem_map = rk3308_mem_map;
 
 #define GRF_BASE	0xff000000
 #define SGRF_BASE	0xff2b0000
-#define CRU_BASE	0xff500000
 
 enum {
+
 	GPIO1C7_SHIFT		= 8,
 	GPIO1C7_MASK		= GENMASK(11, 8),
 	GPIO1C7_GPIO		= 0,
@@ -77,6 +72,14 @@ enum {
 	GPIO4D2_GPIO            = 0,
 	GPIO4D2_SDMMC_D2,
 	GPIO4D2_UART2_RX_M1,
+
+	GPIO2A0_SHIFT		= 0,
+	GPIO2A0_MASK		= GENMASK(1, 0),
+	GPIO2A0_UART0		= 1,
+
+	GPIO2A1_SHIFT		= 2,
+	GPIO2A1_MASK		= GENMASK(3, 2),
+	GPIO2A1_UART0		= 1,
 
 	UART2_IO_SEL_SHIFT	= 2,
 	UART2_IO_SEL_MASK	= GENMASK(3, 2),
@@ -123,11 +126,6 @@ enum {
 	VCCIO3_1V8,
 };
 
-enum {
-	SND_GLB_WDT_RST		= BIT(3),
-	FST_GLB_WDT_RST		= BIT(2),
-};
-
 /*
  * The voltage of VCCIO3(which is the voltage domain of emmc/flash/sfc
  * interface) can indicated by GPIO0_A4 or io_vsel3. The SOC defaults
@@ -138,11 +136,36 @@ enum {
 
 #define GPIO0_A4	4
 
+#ifdef CONFIG_ROCKCHIP_PRELOADER_ATAGS
+/*
+ * Loader 从 TF 起时跳过空白 eMMC 探测，避免 mmc_init 长时间 -22 卡住启动。
+ */
+static void rk3308_disable_emmc_if_sd_boot(void)
+{
+	struct tag *t = atags_get_tag(ATAG_BOOTDEV);
+	int off;
+
+	if (!t)
+		return;
+	if (t->u.bootdev.devtype != BOOT_TYPE_SD0 &&
+	    t->u.bootdev.devtype != BOOT_TYPE_SD1)
+		return;
+
+	off = fdt_path_offset(gd->fdt_blob, "emmc");
+	if (off >= 0)
+		fdt_status_disabled(gd->fdt_blob, off);
+}
+#else
+static void rk3308_disable_emmc_if_sd_boot(void) {}
+#endif
+
 int rk_board_init(void)
 {
 	static struct rk3308_grf * const grf = (void *)GRF_BASE;
 	u32 val;
 	int ret;
+
+	rk3308_disable_emmc_if_sd_boot();
 
 	ret = gpio_request(GPIO0_A4, "gpio0_a4");
 	if (ret < 0) {
@@ -161,120 +184,6 @@ int rk_board_init(void)
 	rk_clrsetreg(&grf->soc_con0, IOVSEL3_CTRL_MASK | IOVSEL3_MASK, val);
 
 	gpio_free(GPIO0_A4);
-	return 0;
-}
-
-#define SERVICE_CPU_BASE		0xff5c0000
-#define SERVICE_VOICE_BASE		0xff5d0000
-#define SERVICE_LOGIC_BASE		0xff5d8000
-#define SERVICE_PERI_BASE		0xff5e0000
-#define SERVICE_CPU_ADDR		(SERVICE_CPU_BASE + 0x80)
-#define SERVICE_VOP_ADDR		(SERVICE_LOGIC_BASE + 0x100)
-#define SERVICE_DMAC0_ADDR		(SERVICE_LOGIC_BASE + 0x0)
-#define SERVICE_DMAC1_ADDR		(SERVICE_LOGIC_BASE + 0x80)
-#define SERVICE_CRYPTO_ADDR		(SERVICE_LOGIC_BASE + 0x180)
-#define SERVICE_VAD_ADDR		(SERVICE_VOICE_BASE + 0x80)
-#define SERVICE_EMMC_ADDR		(SERVICE_PERI_BASE + 0x80)
-#define SERVICE_GMAC_ADDR		(SERVICE_PERI_BASE + 0x100)
-#define SERVICE_NAND_ADDR		(SERVICE_PERI_BASE + 0x180)
-#define SERVICE_SDIO_ADDR		(SERVICE_PERI_BASE + 0x200)
-#define SERVICE_SDMMC_ADDR		(SERVICE_PERI_BASE + 0x280)
-#define SERVICE_SFC_ADDR		(SERVICE_PERI_BASE + 0x300)
-#define SERVICE_USB_HOST_ADDR		(SERVICE_PERI_BASE + 0x380)
-#define SERVICE_USB_OTG_ADDR		(SERVICE_PERI_BASE + 0x400)
-
-#define DOS_PRIORITY_OFFSET		0x8
-#define QOS_PRIORITY_P1_P0(p1, p0)	((((p1) & 0x3) << 8) |\
-					(((p0) & 0x3) << 0))
-
-#define CRU_CLKGATE_CON10		0x0328
-#define CRU_CLKGATE_CON11		0x032c
-#define CRU_CLKGATE_CON12		0x0330
-
-enum {
-	IOVSEL4_SHIFT           = 4,
-	IOVSEL4_MASK            = BIT(4),
-	VCCIO4_3V3              = 0,
-	VCCIO4_1V8,
-};
-
-int arch_cpu_init(void)
-{
-#ifndef CONFIG_TPL_BUILD
-#ifdef CONFIG_SPL_BUILD
-	static struct rk3308_sgrf * const sgrf = (void *)SGRF_BASE;
-
-	/* Set CRYPTO SDMMC EMMC NAND SFC USB master bus to be secure access */
-	rk_clrreg(&sgrf->con_secure0, 0x2b83);
-#else /* uboot */
-
-	/*
-	 * Gate I2Sx_MCLK default
-	 *
-	 * It's safe to gate mclk default to avoid high freq glitch
-	 * which may make devices work unexpected. And then enabled by
-	 * kernel stage or any state where user use it.
-	 */
-	writel(0x80008000, CRU_BASE + CRU_CLKGATE_CON10);
-	writel(0x88888888, CRU_BASE + CRU_CLKGATE_CON11);
-	writel(0x88888888, CRU_BASE + CRU_CLKGATE_CON12);
-#endif
-#else /* defined(CONFIG_TPL_BUILD) */
-	static struct rk3308_cru * const cru = (void *)CRU_BASE;
-	static struct rk3308_grf * const grf = (void *)GRF_BASE;
-	u32 glb_rst_st;
-
-	/*
-	 * RK3308 internally default select 1.8v for VCCIO4 on reset state,
-	 * but some boards may give a 3.3V power supply for VCCIO4, this may
-	 * bring a risk of chip damage through overvoltage. So we internally
-	 * select 3.3V for VCCIO4 as early as possiple to reduces this risk.
-	 */
-	rk_clrsetreg(&grf->soc_con0, IOVSEL4_MASK, VCCIO4_3V3 << IOVSEL4_SHIFT);
-
-	/*
-	 * write BOOT_WATCHDOG to boot mode register, if we are reset by wdt
-	 */
-	glb_rst_st = readl(&cru->glb_rst_st);
-	writel(FST_GLB_WDT_RST | SND_GLB_WDT_RST, &cru->glb_rst_st);
-	if (glb_rst_st & (FST_GLB_WDT_RST | SND_GLB_WDT_RST))
-		writel(BOOT_WATCHDOG, CONFIG_ROCKCHIP_BOOT_MODE_REG);
-
-	/* set wdt tsadc first global reset*/
-	writel(WDT_GLB_SRST_CTRL << WDT_GLB_SRST_CTRL_SHIFT |
-	       TSADC_GLB_SRST_CTRL << TSADC_GLB_SRST_CTRL_SHIFT,
-	       &cru->glb_rst_con);
-
-	/* Set qos priority level */
-	writel(QOS_PRIORITY_P1_P0(1, 1),
-	       SERVICE_CPU_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(3, 3),
-	       SERVICE_VOP_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_DMAC0_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_DMAC1_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_CRYPTO_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(3, 3),
-	       SERVICE_VAD_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_EMMC_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_GMAC_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_NAND_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_SDIO_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_SDMMC_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_SFC_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_USB_HOST_ADDR + DOS_PRIORITY_OFFSET);
-	writel(QOS_PRIORITY_P1_P0(2, 2),
-	       SERVICE_USB_OTG_ADDR + DOS_PRIORITY_OFFSET);
-#endif
 	return 0;
 }
 
@@ -303,87 +212,39 @@ int rk_board_init_f(void)
 
 void board_debug_uart_init(void)
 {
-	static struct rk3308_cru * const cru = (void *)CRU_BASE;
 	static struct rk3308_grf * const grf = (void *)GRF_BASE;
 
-#if defined(CONFIG_DEBUG_UART_BASE)
-#if (CONFIG_DEBUG_UART_BASE == 0xFF0C0000)
-	/*select 24M clock to UART2 */
-	rk_clrsetreg(&cru->clksel_con[16],
-		     CLK_UART2_PLL_SEL_MASK | CLK_UART2_DIV_CON_MASK,
-		     CLK_UART2_PLL_SEL_XIN_OSC0 << CLK_UART2_PLL_SEL_SHIFT |
-		     CLK_UART2_DIV_CON << CLK_UART2_DIV_CON_SHIFT);
+	if (gd && gd->serial.using_pre_serial)
+		return;
 
-#if (CONFIG_ROCKCHIP_UART_MUX_SEL_M == 0)
-	/* Enable early UART2 channel m0 on the rk3308 */
-	rk_clrsetreg(&grf->soc_con5, UART2_IO_SEL_MASK,
-		     UART2_IO_SEL_M0 << UART2_IO_SEL_SHIFT);
-	rk_clrsetreg(&grf->gpio1ch_iomux, GPIO1C7_MASK | GPIO1C6_MASK,
-		     GPIO1C7_UART2_TX_M0 << GPIO1C7_SHIFT |
-		     GPIO1C6_UART2_RX_M0 << GPIO1C6_SHIFT);
-
-#elif (CONFIG_ROCKCHIP_UART_MUX_SEL_M == 1)
-	/* Enable early UART2 channel m1 on the rk3308 */
+#if CONFIG_DEBUG_UART_BASE == 0xff0a0000
+	/* Unihiker 调试口 UART0：GPIO2_A0/A1 */
+	rk_clrsetreg(&grf->gpio2a_iomux, GPIO2A0_MASK,
+		     GPIO2A0_UART0 << GPIO2A0_SHIFT);
+	rk_clrsetreg(&grf->gpio2a_iomux, GPIO2A1_MASK,
+		     GPIO2A1_UART0 << GPIO2A1_SHIFT);
+#elif CONFIG_DEBUG_UART_BASE == 0xff0c0000
+	/* EVB 参考板 UART2 M1 */
 	rk_clrsetreg(&grf->soc_con5, UART2_IO_SEL_MASK,
 		     UART2_IO_SEL_M1 << UART2_IO_SEL_SHIFT);
-	if (readl(BROM_BOOTSOURCE_ID_ADDR) != BROM_BOOTSOURCE_SD)
-		rk_clrsetreg(&grf->gpio4d_iomux,
-			     GPIO4D3_MASK | GPIO4D2_MASK,
-			     GPIO4D2_UART2_RX_M1 << GPIO4D2_SHIFT |
-			     GPIO4D3_UART2_TX_M1 << GPIO4D3_SHIFT);
-#else
-	#error "Please select M0 or M1 for uart2 !!!"
+	rk_clrsetreg(&grf->gpio4d_iomux,
+		     GPIO4D3_MASK | GPIO4D2_MASK,
+		     GPIO4D2_UART2_RX_M1 << GPIO4D2_SHIFT |
+		     GPIO4D3_UART2_TX_M1 << GPIO4D3_SHIFT);
 #endif
-
-#elif (CONFIG_DEBUG_UART_BASE == 0xFF0E0000)
-	/*select 24M clock to UART4 */
-	rk_clrsetreg(&cru->clksel_con[22],
-		     CLK_UART4_PLL_SEL_MASK | CLK_UART4_DIV_CON_MASK,
-		     CLK_UART4_PLL_SEL_XIN_OSC0 << CLK_UART4_PLL_SEL_SHIFT |
-		     CLK_UART4_DIV_CON << CLK_UART4_DIV_CON_SHIFT);
-
-	rk_clrsetreg(&grf->gpio4b_iomux,
-		     GPIO4B1_SEL_MASK | GPIO4B0_SEL_MASK,
-		     GPIO4B1_SEL_UART4_TX << GPIO4B1_SEL_SHIFT |
-		     GPIO4B0_SEL_UART4_RX << GPIO4B0_SEL_SHIFT);
-#elif (CONFIG_DEBUG_UART_BASE == 0xFF0A0000)
-	/*select 24M clock to UART0 */
-	rk_clrsetreg(&cru->clksel_con[10],
-		     CLK_UART0_PLL_SEL_MASK | CLK_UART0_DIV_CON_MASK,
-		     CLK_UART0_PLL_SEL_XIN_OSC0 << CLK_UART0_PLL_SEL_SHIFT |
-		     CLK_UART0_DIV_CON << CLK_UART0_DIV_CON_SHIFT);
-
-	rk_clrsetreg(&grf->gpio2a_iomux,
-		     GPIO2A1_SEL_MASK | GPIO2A0_SEL_MASK,
-		     GPIO2A1_SEL_UART0_TX << GPIO2A1_SEL_SHIFT |
-		     GPIO2A0_SEL_UART0_RX << GPIO2A0_SEL_SHIFT);
-#elif (CONFIG_DEBUG_UART_BASE == 0xFF0B0000)
-	/*select 24M clock to UART1 */
-	rk_clrsetreg(&cru->clksel_con[13],
-		     CLK_UART1_PLL_SEL_MASK | CLK_UART1_DIV_CON_MASK,
-		     CLK_UART1_PLL_SEL_XIN_OSC0 << CLK_UART1_PLL_SEL_SHIFT |
-		     CLK_UART1_DIV_CON << CLK_UART1_DIV_CON_SHIFT);
-
-	rk_clrsetreg(&grf->gpio1d_iomux,
-		     GPIO1D1_SEL_MASK | GPIO1D0_SEL_MASK,
-		     GPIO1D1_SEL_UART1_TX << GPIO1D1_SEL_SHIFT |
-		     GPIO1D1_SEL_UART1_RX << GPIO1D0_SEL_SHIFT);
-#elif (CONFIG_DEBUG_UART_BASE == 0xFF0D0000)
-	/*select 24M clock to UART3 */
-	rk_clrsetreg(&cru->clksel_con[19],
-		     CLK_UART3_PLL_SEL_MASK | CLK_UART3_DIV_CON_MASK,
-		     CLK_UART3_PLL_SEL_XIN_OSC0 << CLK_UART3_PLL_SEL_SHIFT |
-		     CLK_UART3_DIV_CON << CLK_UART3_DIV_CON_SHIFT);
-
-	rk_clrsetreg(&grf->gpio3b_iomux,
-		     GPIO3B5_SEL_MASK | GPIO3B4_SEL_MASK,
-		     GPIO3B5_SEL_UART3_TX << GPIO3B5_SEL_SHIFT |
-		     GPIO3B4_SEL_UART3_RX << GPIO3B4_SEL_SHIFT);
-#else
-	#error "Please select proper uart as debug uart !!!"
-#endif
-#endif /* defined(CONFIG_DEBUG_UART_BASE) */
 }
+
+#if defined(CONFIG_SPL_BUILD)
+int arch_cpu_init(void)
+{
+	static struct rk3308_sgrf * const sgrf = (void *)SGRF_BASE;
+
+	/* Set CRYPTO SDMMC EMMC NAND SFC USB master bus to be secure access */
+	rk_clrreg(&sgrf->con_secure0, 0x2b83);
+
+	return 0;
+}
+#endif
 
 static int fdt_fixup_cpu_idle(const void *blob)
 {
@@ -502,24 +363,22 @@ static int fdt_fixup_pcfg(const void *blob)
 {
 	int depth1_node;
 	int depth2_node;
-	int root_node, i;
-	const char *path[] = { "/", "/pinctrl" };
+	int root_node;
 
-	for (i = 0; i < ARRAY_SIZE(path); i++) {
-		root_node = fdt_path_offset(blob, path[i]);
-		if (root_node < 0)
-			return root_node;
+	root_node = fdt_path_offset(blob, "/");
+	if (root_node < 0)
+		return root_node;
 
-		fdt_for_each_subnode(depth1_node, blob, root_node) {
-			debug("depth1: %s\n", fdt_get_name(blob, depth1_node, NULL));
-			fixup_pcfg_drive_strength(blob, depth1_node);
-			fdt_for_each_subnode(depth2_node, blob, depth1_node) {
-				debug("    depth2: %s\n",
-				      fdt_get_name(blob, depth2_node, NULL));
-				fixup_pcfg_drive_strength(blob, depth2_node);
-			}
+	fdt_for_each_subnode(depth1_node, blob, root_node) {
+		debug("depth1: %s\n", fdt_get_name(blob, depth2_node, NULL));
+		fixup_pcfg_drive_strength(blob, depth1_node);
+		fdt_for_each_subnode(depth2_node, blob, depth1_node) {
+			debug("    depth2: %s\n",
+			      fdt_get_name(blob, depth2_node, NULL));
+			fixup_pcfg_drive_strength(blob, depth2_node);
 		}
 	}
+
 	return 0;
 }
 

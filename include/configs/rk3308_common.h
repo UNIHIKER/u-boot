@@ -9,6 +9,30 @@
 
 #include "rockchip-common.h"
 
+/* RK3308 DTS: mmc0=SD, mmc1=eMMC；启动优先级 SD > USB > eMMC */
+#undef RKIMG_DET_BOOTDEV
+#define RKIMG_DET_BOOTDEV \
+	"rkimg_bootdev=" \
+	"if mmc dev 0 && rkimgtest mmc 0; then " \
+		"setenv devtype mmc; setenv devnum 0; echo Boot from SDcard IDB;" \
+	"elif mmc dev 0; then " \
+		"if fatload mmc 0:5 ${scriptaddr} boot.scr 16; then " \
+			"setenv devtype mmc; setenv devnum 0; echo Boot from TF;" \
+		"fi; " \
+	"elif usb start; then " \
+		"if rkimgtest usb 0; then " \
+			"setenv devtype usb; setenv devnum 0; echo Boot from USB IDB;" \
+		"elif fatload usb 0:5 ${scriptaddr} boot.scr 16; then " \
+			"setenv devtype usb; setenv devnum 0; echo Boot from USB;" \
+		"fi; " \
+	"elif mmc dev 1 && rkimgtest mmc 1; then " \
+		"setenv devtype mmc; setenv devnum 1; echo Boot from eMMC IDB;" \
+	"elif mmc dev 1; then " \
+		"if fatload mmc 1:5 ${scriptaddr} boot.scr 16; then " \
+			"setenv devtype mmc; setenv devnum 1; echo Boot from eMMC;" \
+		"fi; " \
+	"fi; \0"
+
 #define CONFIG_SYS_MALLOC_LEN		(10 << 20)
 #define CONFIG_SYS_CBSIZE		1024
 #define CONFIG_SKIP_LOWLEVEL_INIT
@@ -19,7 +43,7 @@
 #define CONFIG_SYS_NAND_SIZE		(256 * 1024 * 1024)
 #define CONFIG_SPL_FRAMEWORK
 #define CONFIG_SPL_TEXT_BASE		0x00000000
-#define CONFIG_SPL_MAX_SIZE		0x40000
+#define CONFIG_SPL_MAX_SIZE		0x20000
 #define CONFIG_SPL_BSS_START_ADDR	0x00400000
 #define CONFIG_SPL_BSS_MAX_SIZE		0x2000
 #define CONFIG_SYS_SPI_U_BOOT_OFFS	0x8000
@@ -67,7 +91,7 @@
 	"scriptaddr=0x00500000\0" \
 	"pxefile_addr_r=0x00600000\0" \
 	"fdt_addr_r=0x01f00000\0" \
-	"kernel_addr_no_low_bl32_r=0x00280000\0" \
+	"kernel_addr_no_bl32_r=0x00280000\0" \
 	"kernel_addr_r=0x00680000\0" \
 	"kernel_addr_c=0x02480000\0" \
 	"ramdisk_addr_r=0x04000000\0"
@@ -75,10 +99,10 @@
 #define ENV_MEM_LAYOUT_SETTINGS \
 	"scriptaddr=0x00500000\0" \
 	"pxefile_addr_r=0x00600000\0" \
-	"fdt_addr_r=0x02800000\0" \
+	"fdt_addr_r=0x02f00000\0" \
 	"kernel_addr_r=0x00058000\0" \
 	"kernel_addr_c=0x2008000\0" \
-	"ramdisk_addr_r=0x02900000\0"
+	"ramdisk_addr_r=0x02880000\0"
 #endif
 
 #include <config_distro_bootcmd.h>
