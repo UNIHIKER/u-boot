@@ -14,6 +14,8 @@
 	model = "DFRobot unihiker M10";
 	compatible = "dfrobot,unihiker", "rockchip,rk3308";
 
+	/* rk3308-u-boot.dtsi：mmc0=eMMC, mmc1=SD；与内核 aliases 一致，勿覆盖 */
+
 	/* rk3308-u-boot.dtsi 默认 stdout-path=&uart2，Unihiker 调试口为 uart0 */
 	chosen {
 		stdout-path = &uart0;
@@ -61,6 +63,18 @@
 		regulator-max-microvolt = <3300000>;
 		regulator-boot-on;
 		regulator-always-on;
+	};
+
+	/*
+	 * 上电时长按 A 满 10 秒进 recovery。GPIO0_C1 上拉，按下接地。
+	 * board_late_init 确认按住 10 秒后设置 recover=1，boot.cmd 再切 recovery 分区。
+	 */
+	key-a {
+		compatible = "dfrobot,unihiker-key-a";
+		pinctrl-names = "default";
+		pinctrl-0 = <&a_key>;
+		gpios = <&gpio0 RK_PC1 GPIO_ACTIVE_LOW>;
+		status = "okay";
 	};
 
 	/* TF 信号电平：U-Boot 无 regulator-gpio，固定 3.3V 避免 -95 voltage select */
@@ -145,6 +159,12 @@
 	usb {
 		vcc5v0_host_drv: vcc5v0-host-drv {
 			rockchip,pins = <0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	keys {
+		a_key: a-key {
+			rockchip,pins = <0 RK_PC1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };

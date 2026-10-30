@@ -9,7 +9,8 @@
 
 #include <configs/rk3308_common.h>
 
-#define CONFIG_SUPPORT_EMMC_RPMB
+/* CONFIG_SUPPORT_EMMC_RPMB 已由 Kconfig/autoconf 提供，勿在此重复 #define */
+/* mmc0=eMMC，环境变量放板载 eMMC */
 #define CONFIG_SYS_MMC_ENV_DEV 0
 
 

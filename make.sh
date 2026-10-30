@@ -42,9 +42,10 @@ TOOLCHAIN_ARM64=../prebuilts/gcc/linux-x86/aarch64/gcc-arm-10.3-2021.07-x86_64-a
 
 ########################################### User not touch #############################################
 MAKE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_PATH_FIXUP="--replace tools/rk_tools/ ./"
-# 打包 loader/trust 时会 cd 到 rkbin，须使用 u-boot 目录下绝对路径
-RKTOOLS="${MAKE_SCRIPT_DIR}/tools"
+# 新版 rkbin boot_merger 不支持 --replace；在 rkbin 目录下直接用相对 Path 即可
+BIN_PATH_FIXUP=""
+# 打包 loader/trust 时会 cd 到 rkbin，须使用绝对路径（工具在 rkbin/tools）
+RKTOOLS="$(cd "${MAKE_SCRIPT_DIR}/../rkbin/tools" && pwd)"
 
 # Declare global INI file searching index name for every chip, update in select_chip_info()
 RKCHIP=

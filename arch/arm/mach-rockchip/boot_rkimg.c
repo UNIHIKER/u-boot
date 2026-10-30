@@ -122,7 +122,7 @@ static void boot_devtype_init(void)
 #endif
 	ret = rk_board_scan_bootdev();
 	if (ret) {
-		/* Set default if all failed */
+		/* Set default if all failed（mmc0=eMMC） */
 		devtype = "mmc";
 		devnum = "0";
 		env_set("devtype", devtype);
@@ -153,6 +153,7 @@ static int get_bootdev_type(void)
 
 	if (!strcmp(devtype, "mmc")) {
 		type = IF_TYPE_MMC;
+		/* aliases：mmc0=eMMC, mmc1=SD */
 		if (devnum == 1)
 			boot_media = "sd";
 		else

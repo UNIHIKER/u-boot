@@ -9,29 +9,42 @@
 
 #include "rockchip-common.h"
 
-/* RK3308 DTS: mmc0=SD, mmc1=eMMC；启动优先级 SD > USB > eMMC */
+/*
+ * aliases：mmc0=eMMC, mmc1=TF；启动优先级 TF > USB > eMMC
+ * 用 bootfound，避免 usb start 成功但无盘时短路跳过 eMMC。
+ */
 #undef RKIMG_DET_BOOTDEV
 #define RKIMG_DET_BOOTDEV \
 	"rkimg_bootdev=" \
-	"if mmc dev 0 && rkimgtest mmc 0; then " \
-		"setenv devtype mmc; setenv devnum 0; echo Boot from SDcard IDB;" \
-	"elif mmc dev 0; then " \
-		"if fatload mmc 0:5 ${scriptaddr} boot.scr 16; then " \
-			"setenv devtype mmc; setenv devnum 0; echo Boot from TF;" \
+	"setenv bootfound 0; " \
+	"if mmc dev 1; then " \
+		"if rkimgtest mmc 1; then " \
+			"setenv devtype mmc; setenv devnum 1; setenv bootfound 1; " \
+			"echo Boot from SDcard IDB; " \
+		"elif fatload mmc 1:5 ${scriptaddr} boot.scr 16; then " \
+			"setenv devtype mmc; setenv devnum 1; setenv bootfound 1; " \
+			"echo Boot from TF; " \
 		"fi; " \
-	"elif usb start; then " \
+	"fi; " \
+	"if test \"${bootfound}\" != \"1\" && usb start; then " \
 		"if rkimgtest usb 0; then " \
-			"setenv devtype usb; setenv devnum 0; echo Boot from USB IDB;" \
+			"setenv devtype usb; setenv devnum 0; setenv bootfound 1; " \
+			"echo Boot from USB IDB; " \
 		"elif fatload usb 0:5 ${scriptaddr} boot.scr 16; then " \
-			"setenv devtype usb; setenv devnum 0; echo Boot from USB;" \
+			"setenv devtype usb; setenv devnum 0; setenv bootfound 1; " \
+			"echo Boot from USB; " \
 		"fi; " \
-	"elif mmc dev 1 && rkimgtest mmc 1; then " \
-		"setenv devtype mmc; setenv devnum 1; echo Boot from eMMC IDB;" \
-	"elif mmc dev 1; then " \
-		"if fatload mmc 1:5 ${scriptaddr} boot.scr 16; then " \
-			"setenv devtype mmc; setenv devnum 1; echo Boot from eMMC;" \
+	"fi; " \
+	"if test \"${bootfound}\" != \"1\" && mmc dev 0; then " \
+		"if rkimgtest mmc 0; then " \
+			"setenv devtype mmc; setenv devnum 0; setenv bootfound 1; " \
+			"echo Boot from eMMC IDB; " \
+		"elif fatload mmc 0:5 ${scriptaddr} boot.scr 16; then " \
+			"setenv devtype mmc; setenv devnum 0; setenv bootfound 1; " \
+			"echo Boot from eMMC; " \
 		"fi; " \
-	"fi; \0"
+	"fi; " \
+	"test \"${bootfound}\" = \"1\"; \0"
 
 #define CONFIG_SYS_MALLOC_LEN		(10 << 20)
 #define CONFIG_SYS_CBSIZE		1024
